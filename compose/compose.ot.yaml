@@ -1,0 +1,210 @@
+# =============================================================================
+# Phase 1: OT Simulator (Real ICSSIM Stack)
+# =============================================================================
+# Full ICSSIM bottle-filling factory simulation with real Modbus/TCP traffic
+# Network: 192.168.0.0/24 (ICS network) and 192.168.1.0/24 (Physical process)
+
+services:
+  # Physical Simulation
+  pys:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-pys
+    hostname: pys
+    privileged: true
+    working_dir: /src
+    command: ["python3", "FactorySimulation.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_physical:
+        ipv4_address: 192.168.1.31
+    restart: unless-stopped
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=physical-sim"
+
+  # PLC 1 - Tank Control
+  plc1:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-plc1
+    hostname: plc1
+    privileged: true
+    working_dir: /src
+    command: ["python3", "PLC1.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.11
+      ot_physical:
+        ipv4_address: 192.168.1.11
+    restart: unless-stopped
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=plc1"
+      - "com.ics-anom.modbus=server"
+
+  # PLC 2 - Conveyor Control
+  plc2:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-plc2
+    hostname: plc2
+    privileged: true
+    working_dir: /src
+    command: ["python3", "PLC2.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.12
+      ot_physical:
+        ipv4_address: 192.168.1.12
+    restart: unless-stopped
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=plc2"
+      - "com.ics-anom.modbus=server"
+
+  # HMI 1
+  hmi1:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-hmi1
+    hostname: hmi1
+    privileged: true
+    working_dir: /src
+    command: ["python3", "HMI1.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.21
+    restart: unless-stopped
+    depends_on:
+      - plc1
+      - plc2
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=hmi1"
+      - "com.ics-anom.modbus=client"
+
+  # HMI 2
+  hmi2:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-hmi2
+    hostname: hmi2
+    privileged: true
+    working_dir: /src
+    command: ["python3", "HMI2.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.22
+    restart: unless-stopped
+    depends_on:
+      - plc1
+      - plc2
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=hmi2"
+      - "com.ics-anom.modbus=client"
+
+  # HMI 3
+  hmi3:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.component
+    container_name: icssim-hmi3
+    hostname: hmi3
+    privileged: true
+    working_dir: /src
+    command: ["python3", "HMI3.py"]
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.23
+    restart: unless-stopped
+    depends_on:
+      - plc1
+      - plc2
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=hmi3"
+      - "com.ics-anom.modbus=client"
+
+  # Attacker (for Phase 6 scenarios - optional)
+  attacker:
+    build:
+      context: ../docker/icssim
+      dockerfile: Dockerfile.attacker
+    container_name: icssim-attacker
+    hostname: attacker
+    privileged: true
+    working_dir: /src
+    command: ["tail", "-f", "/dev/null"]  # Keep alive, manual attack triggering
+    volumes:
+      - icssim_src:/src
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.42
+    restart: unless-stopped
+    profiles:
+      - attack  # Only start with --profile attack
+    labels:
+      - "com.ics-anom.phase=1"
+      - "com.ics-anom.layer=ot"
+      - "com.ics-anom.component=attacker"
+
+networks:
+  ot_network:
+    name: ot_network
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.168.0.0/24
+          gateway: 192.168.0.1
+    driver_opts:
+      com.docker.network.bridge.name: br_icsnet
+    internal: false  # Allow outbound during build
+    labels:
+      - "com.ics-anom.network=ot-ics"
+      - "com.ics-anom.capture=true"
+
+  ot_physical:
+    name: ot_physical
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+    driver_opts:
+      com.docker.network.bridge.name: br_phynet
+    internal: true  # Completely isolated physical process network
+    labels:
+      - "com.ics-anom.network=ot-physical"
+      - "com.ics-anom.capture=false"
+
+volumes:
+  icssim_src:
+    name: icssim_src
+    labels:
+      - "com.ics-anom.volume=source-code"

@@ -1,0 +1,14 @@
+{
+  "total_samples": 120,
+  "anomalies_detected": 2,
+  "anomaly_rate": 0.016666666666666666,
+  "mean_anomaly_score": -0.48249986667909384,
+  "anomaly_score_range": [
+    -0.6552879047215726,
+    -0.422987959703762
+  ],
+  "most_anomalous_score": -0.6552879047215726,
+  "time_windows_with_anomalies": [
+    5875267
+  ]
+}

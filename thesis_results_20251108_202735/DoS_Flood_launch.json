@@ -1,0 +1,1 @@
+{"attack_id":"dos_flood_plc1_1762633696","status":"running","message":"Attack launched successfully. Monitor with /attacks/status/dos_flood_plc1_1762633696","attack_type":"dos_flood","target":"plc1","started_at":"2025-11-08T20:28:16.810828"}

@@ -1,0 +1,50 @@
+===================================================================
+DATA COLLECTION INVENTORY FOR THESIS
+===================================================================
+
+Collection Date: Sat Nov  8 08:50:57 PM UTC 2025
+Results Directory: thesis_results_20251108_202735
+
+-------------------------------------------------------------------
+DETECTION RESULTS
+-------------------------------------------------------------------
+- *_detections.log: Raw detection logs per attack
+- *_stats.json: Statistical summary per attack
+- *_current.json: Detailed anomaly records
+- *_attack_status.json: Attack execution status
+- *_summary.txt: Per-attack summary
+
+-------------------------------------------------------------------
+SYSTEM LOGS
+-------------------------------------------------------------------
+- detector_full_log.txt: Complete detection engine logs
+- zeek_log.txt: Network capture logs
+
+-------------------------------------------------------------------
+DETECTION DATA FILES (Parquet)
+-------------------------------------------------------------------
+Directory: detection_files/
+Format: Parquet (columnar, efficient)
+Contents: Timestamped anomaly records with feature values
+
+-------------------------------------------------------------------
+THESIS METRICS TO EXTRACT
+-------------------------------------------------------------------
+For each attack type, calculate:
+1. True Positives (TP): Anomalies during attack
+2. False Positives (FP): Anomalies during baseline
+3. Detection Rate: TP / Total attack windows
+4. Precision: TP / (TP + FP)
+5. Average anomaly score during attack
+6. Detection latency (time from attack start to first detection)
+
+-------------------------------------------------------------------
+RECOMMENDED ANALYSIS
+-------------------------------------------------------------------
+1. Load detection_files/*.parquet into pandas
+2. Analyze feature values during each attack type
+3. Identify which features were most discriminative
+4. Compare anomaly scores across attack types
+5. Generate confusion matrices per attack
+6. Create time-series plots of detection timeline
+

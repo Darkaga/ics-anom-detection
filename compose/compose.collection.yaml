@@ -1,0 +1,116 @@
+# =============================================================================
+# Phase 2: Collection Layer (Zeek + MinIO)
+# =============================================================================
+# Captures Modbus/TCP traffic from Phase 1, parses with Zeek, stores in MinIO
+
+services:
+  # MinIO - S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    hostname: minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-admin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minio123secure}
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Web Console
+    volumes:
+      - minio_data:/data
+    networks:
+      collect_net:
+        ipv4_address: 172.21.0.10
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "com.ics-anom.phase=2"
+      - "com.ics-anom.layer=collection"
+      - "com.ics-anom.component=storage"
+
+  # MinIO Client - Setup buckets
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-admin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minio123secure}
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set minio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing minio/pcaps;
+      mc mb --ignore-existing minio/zeek-logs;
+      mc mb --ignore-existing minio/zeek-features;
+      mc mb --ignore-existing minio/models;
+      echo 'Buckets created successfully';
+      exit 0;
+      "
+    networks:
+      - collect_net
+    labels:
+      - "com.ics-anom.phase=2"
+      - "com.ics-anom.layer=collection"
+      - "com.ics-anom.component=setup"
+
+  # Zeek - Network analysis with ICSNPP-Modbus
+  zeek:
+    build:
+      context: ../docker/zeek
+      dockerfile: Dockerfile
+    container_name: zeek
+    hostname: zeek
+    privileged: true
+    network_mode: host  # Need host mode to access br_icsnet bridge
+    environment:
+      - ZEEK_INTERFACE=br_icsnet
+      - ZEEK_FILTER=net 192.168.0.0/24 and tcp port 502
+      - MINIO_ENDPOINT=http://172.21.0.10:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-admin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minio123secure}
+      - ROTATION_INTERVAL=3600  # Rotate logs every hour
+    volumes:
+      - zeek_logs:/zeek/logs
+      - zeek_scripts:/zeek/scripts
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "com.ics-anom.phase=2"
+      - "com.ics-anom.layer=collection"
+      - "com.ics-anom.component=zeek"
+
+networks:
+  collect_net:
+    name: collect_net
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.21.0.0/24
+          gateway: 172.21.0.1
+    labels:
+      - "com.ics-anom.network=collection"
+
+volumes:
+  minio_data:
+    name: minio_data
+    labels:
+      - "com.ics-anom.volume=object-storage"
+  zeek_logs:
+    name: zeek_logs
+    labels:
+      - "com.ics-anom.volume=zeek-logs"
+  zeek_scripts:
+    name: zeek_scripts
+    labels:
+      - "com.ics-anom.volume=zeek-scripts"

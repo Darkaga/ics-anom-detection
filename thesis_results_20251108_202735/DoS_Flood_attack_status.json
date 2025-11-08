@@ -1,0 +1,14 @@
+{
+  "attack_id": "dos_flood_plc1_1762633696",
+  "attack_type": "dos_flood",
+  "target": "plc1",
+  "status": "completed",
+  "started_at": "2025-11-08T20:28:16.810828",
+  "completed_at": "2025-11-08T20:29:16.892426",
+  "duration": 60.081598,
+  "result": {
+    "return_code": 0,
+    "output": "[*] Starting DoS flood attack on 192.168.0.11\n[*] Duration: 60 seconds\n[*] Workers: 5\n[*] This will flood the PLC with rapid requests\n\n[*] Attack complete!\n[*] Total requests: 226469\n[*] Request rate: 3774.0 requests/sec\n[*] Elapsed time: 60.0 seconds\n  Worker 1: 45293 requests\n  Worker 3: 45293 requests\n  Worker 4: 45299 requests\n  Worker 2: 45289 requests\n  Worker 0: 45295 requests\n",
+    "error": ""
+  }
+}

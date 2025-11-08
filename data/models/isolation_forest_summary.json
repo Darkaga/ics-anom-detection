@@ -1,0 +1,7 @@
+{
+  "total_samples": 596,
+  "anomalies_detected": 6,
+  "anomaly_rate": 0.010067114093959731,
+  "mean_anomaly_score": -0.4905834970566639,
+  "std_anomaly_score": 0.04398680654611062
+}

@@ -1,0 +1,42 @@
+# =============================================================================
+# Phase 3/4: ML Pipeline (Feature Extraction + Training)
+# =============================================================================
+# GPU-accelerated ML pipeline using RAPIDS
+
+services:
+  ml-pipeline:
+    build:
+      context: ../
+      dockerfile: docker/ml/Dockerfile
+    container_name: ics-ml-pipeline
+    hostname: ml-pipeline
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # Mount data directories
+      - ../data:/workspace/data
+      - ../scripts:/workspace/scripts
+      - ../notebooks:/workspace/notebooks
+      # Optional: Mount additional datasets
+      - ml_models:/workspace/models
+    working_dir: /workspace
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - RAPIDS_NO_INITIALIZE=1
+    stdin_open: true
+    tty: true
+    labels:
+      - "com.ics-anom.phase=3-4"
+      - "com.ics-anom.layer=ml"
+      - "com.ics-anom.component=training"
+
+volumes:
+  ml_models:
+    name: ml_models
+    labels:
+      - "com.ics-anom.volume=ml-models"

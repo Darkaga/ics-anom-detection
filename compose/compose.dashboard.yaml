@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Phase 5: Dashboard
+  # =============================================================================
+  ics-dashboard:
+    build:
+      context: ../docker/dashboard
+      dockerfile: Dockerfile
+    container_name: ics-dashboard
+    networks:
+      - ot_network
+    ports:
+      - "8501:8501"
+    environment:
+      - DETECTION_API=http://ics-detection-api:8000
+      - ATTACK_API=http://ics-attacker:8002
+    depends_on:
+      - ics-attacker
+    restart: unless-stopped
+    labels:
+      com.ics-anom.phase: "5"
+      com.ics-anom.component: "dashboard"
+      com.ics-anom.description: "Streamlit dashboard for monitoring and attack control"
+
+  # =============================================================================
+  # Phase 6: Attacker
+  # =============================================================================
+  ics-attacker:
+    build:
+      context: ../docker/attacker
+      dockerfile: Dockerfile
+    container_name: ics-attacker
+    networks:
+      ot_network:
+        ipv4_address: 192.168.0.42
+    ports:
+      - "8002:8002"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    labels:
+      com.ics-anom.phase: "6"
+      com.ics-anom.component: "attacker"
+      com.ics-anom.description: "Attack server for executing scenarios"
+
+networks:
+  ot_network:
+    external: true
+    name: ot_network

@@ -1,0 +1,7 @@
+{
+  "total_records": 409485,
+  "feature_vectors": 120,
+  "num_features": 31,
+  "time_window_seconds": 300,
+  "mode": "Advanced behavioral analysis"
+}

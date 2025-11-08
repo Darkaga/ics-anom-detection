@@ -1,0 +1,41 @@
+services:
+  detection-api:
+    build:
+      context: ../docker/detection
+      dockerfile: Dockerfile
+    container_name: ics-detection-api
+    hostname: detection-api
+    networks:
+      - ot_network
+    ports:
+      - "8001:8000"
+    volumes:
+      - zeek_logs:/zeek/logs:ro  # ← CHANGED: Use Zeek's volume
+      - ../data/models:/data/models:ro
+      - ../data/detections:/data/detections
+      - ../scripts:/app/scripts:ro
+    environment:
+      - LOG_FILE=/zeek/logs/modbus_detailed.log  # ← CHANGED: New path
+      - MODEL_PATH=/data/models/anomaly_detector.pkl
+      - OUTPUT_DIR=/data/detections
+      - WINDOW_SECONDS=300
+      - POLL_INTERVAL=5
+      - ANOMALY_THRESHOLD=-0.70
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  ot_network:
+    external: true
+    name: ot_network
+
+volumes:
+  zeek_logs:
+    external: true
+    name: zeek_logs

@@ -1,0 +1,49 @@
+===================================================================
+ML-Based Anomaly Detection in ICS/OT Networks
+Comprehensive Attack Evaluation Results
+===================================================================
+
+Test Date: Sat Nov  8 08:50:57 PM UTC 2025
+System Configuration:
+- Model: Isolation Forest (28 features)
+- Threshold: -0.70
+- Window Size: 300 seconds
+- Analysis Frequency: Every 5 seconds
+
+-------------------------------------------------------------------
+DETECTION RESULTS BY ATTACK TYPE
+-------------------------------------------------------------------
+
+Attack Type: DoS_Flood
+Attack ID: dos_flood_plc1_1762633696
+Target: plc1
+Duration: 60s
+Baseline Anomalies: 394
+Total Detected: 22
+Detection: SUCCESS
+Timestamp: Sat Nov  8 08:34:21 PM UTC 2025
+
+-------------------------------------------------------------------
+
+Attack Type: Response_Injection
+Attack ID: null
+Target: plc1
+Duration: 60s
+Baseline Anomalies: 421
+Total Detected: 28
+Detection: SUCCESS
+Timestamp: Sat Nov  8 08:42:09 PM UTC 2025
+
+-------------------------------------------------------------------
+
+Attack Type: Reconnaissance
+Attack ID: null
+Target: plc1
+Duration: 60s
+Baseline Anomalies: 463
+Total Detected: 68
+Detection: SUCCESS
+Timestamp: Sat Nov  8 08:49:57 PM UTC 2025
+
+-------------------------------------------------------------------
+

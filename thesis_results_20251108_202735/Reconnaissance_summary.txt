@@ -1,0 +1,8 @@
+Attack Type: Reconnaissance
+Attack ID: null
+Target: plc1
+Duration: 60s
+Baseline Anomalies: 463
+Total Detected: 68
+Detection: SUCCESS
+Timestamp: Sat Nov  8 08:49:57 PM UTC 2025

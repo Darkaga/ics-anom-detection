@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""
+Real-time Anomaly Detector for ICS Modbus Traffic
+Monitors Zeek logs and detects anomalies using Isolation Forest with temporal features
+"""
+
+import asyncio
+import logging
+import os
+import pickle
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+
+class RealtimeDetector:
+    """Real-time anomaly detection engine with temporal feature support"""
+    
+    def __init__(self,
+                 log_file: str,
+                 model_path: str,
+                 output_dir: str,
+                 window_seconds: int = 300,
+                 poll_interval: int = 5,
+                 anomaly_threshold: float = -0.5):
+        """
+        Initialize the detector
+        
+        Args:
+            log_file: Path to Zeek Modbus log file
+            model_path: Path to trained model pickle file
+            output_dir: Directory to save detected anomalies
+            window_seconds: Time window size in seconds
+            poll_interval: How often to check for new data (seconds)
+            anomaly_threshold: Threshold for anomaly detection
+        """
+        self.log_file = Path(log_file)
+        self.model_path = Path(model_path)
+        self.output_dir = Path(output_dir)
+        self.window_seconds = window_seconds
+        self.poll_interval = poll_interval
+        self.anomaly_threshold = anomaly_threshold
+        
+        # Create output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # State tracking
+        self.running = False
+        self.last_position = 0
+        self.records_processed = 0
+        self.anomalies_detected = 0
+        self.started_at = None
+        self.last_check = None
+        self.current_window = None
+        self.recent_anomalies: List[Dict] = []
+        self.window_history: Dict[str, List[Dict]] = {}  # Track window history for temporal features
+        
+        # Setup logging
+        self.logger = logging.getLogger(__name__)
+        
+        # Load model
+        self.logger.info(f"Loading model from {model_path}")
+        self._load_model()
+    
+    def _load_model(self):
+        """Load the trained anomaly detection model"""
+        try:
+            with open(self.model_path, 'rb') as f:
+                model_data = pickle.load(f)
+            
+            self.model = model_data['model']
+            self.scaler = model_data['scaler']
+            self.feature_columns = model_data['feature_columns']
+            
+            self.logger.info(f"Model loaded successfully: {len(self.feature_columns)} features")
+        except Exception as e:
+            self.logger.error(f"Failed to load model: {e}")
+            raise
+    
+    def get_status(self) -> Dict:
+        """Get current detector status"""
+        return {
+            'running': self.running,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'records_processed': self.records_processed,
+            'anomalies_detected': self.anomalies_detected,
+            'last_check': self.last_check.isoformat() if self.last_check else None,
+            'current_window': self.current_window
+        }
+    
+    def get_recent_anomalies(self, limit: int = 20) -> List[Dict]:
+        """Get most recent anomalies from memory"""
+        return self.recent_anomalies[-limit:]
+    
+    async def start(self):
+        """Start the detection engine"""
+        self.running = True
+        self.started_at = datetime.now()
+        
+        self.logger.info("Starting real-time detection engine")
+        self.logger.info(f"Monitoring: {self.log_file}")
+        self.logger.info(f"Model: {self.model_path}")
+        self.logger.info(f"Window: {self.window_seconds}s, Poll: {self.poll_interval}s")
+        
+        while self.running:
+            try:
+                await self._detection_loop()
+                await asyncio.sleep(self.poll_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in detection loop: {e}", exc_info=True)
+                await asyncio.sleep(self.poll_interval)
+    
+    async def stop(self):
+        """Stop the detection engine"""
+        self.logger.info("Stopping detection engine")
+        self.running = False
+    
+    async def _detection_loop(self):
+        """Main detection loop - process new data"""
+        self.last_check = datetime.now()
+        
+        # Check if log file exists
+        if not self.log_file.exists():
+            self.logger.warning(f"Log file not found: {self.log_file}")
+            return
+        
+        # Read new data from log
+        new_data = self._read_new_data()
+        
+        if new_data is None or len(new_data) == 0:
+            return
+        
+        self.records_processed += len(new_data)
+        
+        # Group into time windows and detect anomalies
+        windows = self._group_into_windows(new_data)
+        
+        for window_id, window_data in windows.items():
+            self.current_window = window_id
+            await self._process_window(window_id, window_data)
+    
+    def _read_new_data(self) -> Optional[pd.DataFrame]:
+        """Read new data from log file since last position"""
+        try:
+            # Get file size
+            file_size = self.log_file.stat().st_size
+            
+            if file_size <= self.last_position:
+                # File hasn't grown or was rotated
+                if file_size < self.last_position:
+                    self.logger.info("Log file rotated, resetting position")
+                    self.last_position = 0
+                else:
+                    return None
+            
+            # Read from last position
+            with open(self.log_file, 'r') as f:
+                f.seek(self.last_position)
+                lines = f.readlines()
+                self.last_position = f.tell()
+            
+            if not lines:
+                return None
+            
+            # Parse TSV data (skip comment lines starting with #)
+            data_lines = [line for line in lines if not line.startswith('#')]
+            
+            if not data_lines:
+                return None
+            
+            # Read into DataFrame
+            from io import StringIO
+            data = StringIO(''.join(data_lines))
+            
+            # Expected columns from Zeek modbus_detailed log
+            columns = ['ts', 'uid', 'id.orig_h', 'id.orig_p', 'id.resp_h', 'id.resp_p',
+                      'proto', 'track_address', 'unit_id', 'func', 'network_direction',
+                      'register_start', 'register_count', 'response_values']
+            
+            df = pd.read_csv(data, sep='\t', names=columns, on_bad_lines='skip')
+            
+            # Rename columns for easier access
+            df = df.rename(columns={
+                'id.orig_h': 'src',
+                'id.resp_h': 'dst',
+            })
+            
+            # Parse response_values (comma-separated integers)
+            if 'response_values' in df.columns:
+                df['response_values'] = df['response_values'].apply(self._parse_response_values)
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"Error reading log file: {e}", exc_info=True)
+            return None
+    
+    def _parse_response_values(self, val):
+        """Parse response values string into list of integers"""
+        if pd.isna(val) or val == '-':
+            return []
+        try:
+            return [int(x) for x in str(val).split(',') if x.strip()]
+        except:
+            return []
+    
+    def _group_into_windows(self, data: pd.DataFrame) -> Dict[int, pd.DataFrame]:
+        """Group data into time windows"""
+        if data.empty:
+            return {}
+        
+        # Convert timestamp to window ID
+        data['window_id'] = (data['ts'] // self.window_seconds).astype(int)
+        
+        # Group by window
+        windows = {}
+        for window_id in data['window_id'].unique():
+            window_data = data[data['window_id'] == window_id]
+            windows[window_id] = window_data
+        
+        return windows
+    
+    async def _process_window(self, window_id: int, window_data: pd.DataFrame):
+        """Process a single time window"""
+        # Group by device pairs (src -> dst)
+        device_pairs = window_data.groupby(['src', 'dst'])
+        
+        self.logger.info(f"Analyzing {len(device_pairs)} device pairs from completed window")
+        
+        # Extract features and detect anomalies for each device pair
+        anomalies = []
+        
+        for (src, dst), pair_data in device_pairs:
+            features = self._extract_features(pair_data, window_id, src, dst)
+            
+            if features is not None:
+                is_anomaly, score = self._detect_anomaly(features)
+                
+                if is_anomaly:
+                    anomaly_record = {
+                        'time_window': window_id,
+                        'src': src,
+                        'dst': dst,
+                        'anomaly_score': score,
+                        'detected_at': datetime.now().isoformat(),
+                        **{k: v for k, v in features.items() if k not in ['time_window', 'src', 'dst']}
+                    }
+                    anomalies.append(anomaly_record)
+                    
+                    self.logger.warning(
+                        f"ANOMALY DETECTED: {src} → {dst} "
+                        f"(score: {score:.3f}, window: {window_id})"
+                    )
+        
+        if anomalies:
+            self.anomalies_detected += len(anomalies)
+            self.recent_anomalies.extend(anomalies)
+            # Keep only last 100 in memory
+            if len(self.recent_anomalies) > 100:
+                self.recent_anomalies = self.recent_anomalies[-100:]
+            
+            # Save to file
+            self._save_anomalies(anomalies)
+        else:
+            self.logger.info("No anomalies detected in this window")
+    
+    def _extract_features(self, window_data: pd.DataFrame, time_window: int, 
+                         src: str, dst: str) -> Optional[Dict]:
+        """Extract behavioral features with temporal context"""
+        try:
+            if window_data.empty:
+                return None
+            
+            # Base features
+            features = {
+                'time_window': time_window,
+                'src': src,
+                'dst': dst
+            }
+            
+            # Value statistics
+            if 'response_values' in window_data.columns:
+                values = window_data['response_values'].dropna()
+                if len(values) > 0:
+                    value_means = values.apply(lambda x: np.mean(x) if isinstance(x, list) and len(x) > 0 else 0)
+                    features['value_mean_mean'] = float(value_means.mean())
+                    features['value_mean_std'] = float(value_means.std()) if len(value_means) > 1 else 0.0
+                    features['value_mean_min'] = float(value_means.min())
+                    features['value_mean_max'] = float(value_means.max())
+                    
+                    value_stds = values.apply(lambda x: np.std(x) if isinstance(x, list) and len(x) > 1 else 0)
+                    features['value_std_mean'] = float(value_stds.mean())
+                    features['value_std_max'] = float(value_stds.max())
+                    
+                    value_ranges = values.apply(lambda x: np.ptp(x) if isinstance(x, list) and len(x) > 0 else 0)
+                    features['value_range_mean'] = float(value_ranges.mean())
+                    features['value_range_max'] = float(value_ranges.max())
+                    
+                    changes = values.apply(lambda x: len(set(x)) if isinstance(x, list) and len(x) > 0 else 1)
+                    features['value_changes_sum'] = int(changes.sum())
+                    features['value_change_rate_mean'] = float(changes.mean())
+                    
+                    unique_counts = values.apply(lambda x: len(set(x)) if isinstance(x, list) and len(x) > 0 else 1)
+                    features['unique_values_mean'] = float(unique_counts.mean())
+                    
+                    # Entropy calculation
+                    entropies = []
+                    for val_list in values:
+                        if isinstance(val_list, list) and len(val_list) > 1:
+                            unique, counts = np.unique(val_list, return_counts=True)
+                            probs = counts / len(val_list)
+                            entropy = -np.sum(probs * np.log2(probs + 1e-10))
+                            entropies.append(entropy)
+                        else:
+                            entropies.append(0.0)
+                    features['entropy_mean'] = float(np.mean(entropies))
+                else:
+                    for key in ['value_mean_mean', 'value_mean_std', 'value_mean_min', 'value_mean_max',
+                               'value_std_mean', 'value_std_max', 'value_range_mean', 'value_range_max',
+                               'value_changes_sum', 'value_change_rate_mean', 'unique_values_mean', 'entropy_mean']:
+                        features[key] = 0.0
+            else:
+                for key in ['value_mean_mean', 'value_mean_std', 'value_mean_min', 'value_mean_max',
+                           'value_std_mean', 'value_std_max', 'value_range_mean', 'value_range_max',
+                           'value_changes_sum', 'value_change_rate_mean', 'unique_values_mean', 'entropy_mean']:
+                    features[key] = 0.0
+            
+            # Read statistics
+            features['read_count_sum'] = int(len(window_data))
+            window_duration = (window_data['ts'].max() - window_data['ts'].min())
+            features['read_rate_mean'] = float(features['read_count_sum'] / window_duration if window_duration > 0 else 0)
+            
+            # Inter-arrival times
+            if len(window_data) > 1:
+                inter_arrivals = window_data['ts'].diff().dropna()
+                features['inter_read_mean_mean'] = float(inter_arrivals.mean())
+                features['inter_read_std_mean'] = float(inter_arrivals.std())
+            else:
+                features['inter_read_mean_mean'] = 0.0
+                features['inter_read_std_mean'] = 0.0
+            
+            # Outlier detection
+            if 'response_values' in window_data.columns and len(window_data) > 2:
+                values = window_data['response_values'].dropna()
+                if len(values) > 0:
+                    value_means = values.apply(lambda x: np.mean(x) if isinstance(x, list) and len(x) > 0 else 0)
+                    if len(value_means) > 1 and value_means.std() > 0:
+                        z_scores = np.abs((value_means - value_means.mean()) / value_means.std())
+                        features['outlier_count_sum'] = int((z_scores > 3).sum())
+                        features['max_z_score_max'] = float(z_scores.max())
+                    else:
+                        features['outlier_count_sum'] = 0
+                        features['max_z_score_max'] = 0.0
+                else:
+                    features['outlier_count_sum'] = 0
+                    features['max_z_score_max'] = 0.0
+            else:
+                features['outlier_count_sum'] = 0
+                features['max_z_score_max'] = 0.0
+            
+            # Register access patterns
+            if 'register_start' in window_data.columns:
+                features['registers_accessed'] = int(window_data['register_start'].nunique())
+            else:
+                features['registers_accessed'] = 0
+            
+            # === TEMPORAL FEATURES ===
+            # Compute rolling statistics over previous windows
+            device_pair = f"{src}_{dst}"
+            
+            # Initialize history for this device pair if needed
+            if device_pair not in self.window_history:
+                self.window_history[device_pair] = []
+            
+            # Get historical features
+            history = self.window_history[device_pair]
+            
+            if len(history) >= 3:  # Need at least 3 windows for meaningful rolling stats
+                # Extract historical values for key metrics (last 10 windows)
+                recent_history = history[-10:]
+                hist_value_means = [h.get('value_mean_mean', 0) for h in recent_history]
+                hist_read_counts = [h.get('read_count_sum', 0) for h in recent_history]
+                hist_change_rates = [h.get('value_change_rate_mean', 0) for h in recent_history]
+                
+                # Compute rolling statistics
+                features['value_mean_mean_rolling_mean'] = float(np.mean(hist_value_means))
+                features['value_mean_mean_rolling_std'] = float(np.std(hist_value_means))
+                features['value_mean_mean_deviation'] = float(features['value_mean_mean'] - features['value_mean_mean_rolling_mean'])
+                
+                features['read_count_sum_rolling_mean'] = float(np.mean(hist_read_counts))
+                features['read_count_sum_rolling_std'] = float(np.std(hist_read_counts))
+                features['read_count_sum_deviation'] = float(features['read_count_sum'] - features['read_count_sum_rolling_mean'])
+                
+                features['value_change_rate_mean_rolling_mean'] = float(np.mean(hist_change_rates))
+                features['value_change_rate_mean_rolling_std'] = float(np.std(hist_change_rates))
+                features['value_change_rate_mean_deviation'] = float(features['value_change_rate_mean'] - features['value_change_rate_mean_rolling_mean'])
+            else:
+                # Not enough history - use current values as baseline
+                features['value_mean_mean_rolling_mean'] = features['value_mean_mean']
+                features['value_mean_mean_rolling_std'] = 0.0
+                features['value_mean_mean_deviation'] = 0.0
+                
+                features['read_count_sum_rolling_mean'] = float(features['read_count_sum'])
+                features['read_count_sum_rolling_std'] = 0.0
+                features['read_count_sum_deviation'] = 0.0
+                
+                features['value_change_rate_mean_rolling_mean'] = features['value_change_rate_mean']
+                features['value_change_rate_mean_rolling_std'] = 0.0
+                features['value_change_rate_mean_deviation'] = 0.0
+            
+            # Add current features to history (keep last 20 windows)
+            self.window_history[device_pair].append(features.copy())
+            if len(self.window_history[device_pair]) > 20:
+                self.window_history[device_pair] = self.window_history[device_pair][-20:]
+            
+            return features
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting features: {e}", exc_info=True)
+            return None
+    
+    def _detect_anomaly(self, features: Dict) -> tuple[bool, float]:
+        """Detect if features indicate an anomaly"""
+        try:
+            # Extract feature values in correct order
+            feature_values = []
+            for col in self.feature_columns:
+                feature_values.append(features.get(col, 0.0))
+            
+            X = np.array(feature_values).reshape(1, -1)
+            
+            # Scale features
+            X_scaled = self.scaler.transform(X)
+            
+            # Get anomaly score
+            score = self.model.score_samples(X_scaled)[0]
+            
+            # Determine if anomaly
+            is_anomaly = score < self.anomaly_threshold
+            
+            return is_anomaly, float(score)
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting anomalies: {e}", exc_info=True)
+            return False, 0.0
+    
+    def _save_anomalies(self, anomalies: List[Dict]):
+        """Save detected anomalies to Parquet file"""
+        try:
+            if not anomalies:
+                return
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(anomalies)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_file = self.output_dir / f'anomalies_{timestamp}.parquet'
+            
+            # Save as Parquet
+            table = pa.Table.from_pandas(df)
+            pq.write_table(table, output_file)
+            
+            self.logger.info(f"Saved {len(anomalies)} anomalies to {output_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving anomalies: {e}", exc_info=True)
+
+
+if __name__ == "__main__":
+    # For testing
+    import sys
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    detector = RealtimeDetector(
+        log_file='/zeek/logs/modbus_detailed.log',
+        model_path='/data/models/anomaly_detector.pkl',
+        output_dir='/data/detections'
+    )
+    
+    async def main():
+        await detector.start()
+    
+    asyncio.run(main())

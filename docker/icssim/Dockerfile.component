@@ -1,0 +1,56 @@
+# =============================================================================
+# ICSSIM Component - Base Image for PLC/HMI/Physical Simulation
+# =============================================================================
+
+FROM python:3.10-slim-bullseye
+
+LABEL maintainer="ICS Anomaly Detection"
+LABEL description="ICSSIM Component - PLC/HMI/Simulator"
+LABEL phase="1-ot"
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /tmp
+
+# Clone ICSSIM
+RUN git clone https://github.com/AlirezaDehlaghi/ICSSIM.git /tmp/icssim
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    pyModbusTCP==0.2.0 \
+    python-memcached==1.59 \
+    scapy==2.5.0 \
+    numpy==1.24.3 \
+    pandas==2.0.3 \
+    pyyaml==6.0
+
+# Copy source files to /src
+RUN cp -r /tmp/icssim/src /src && \
+    chmod -R 755 /src
+
+# Create start script
+RUN echo '#!/bin/bash\n\
+cd /src\n\
+exec python3 "$@"\n\
+' > /src/start.sh && chmod +x /src/start.sh
+
+# Runtime user (non-root)
+RUN useradd -m -u 1000 -s /bin/bash icssim && \
+    chown -R icssim:icssim /src
+
+USER icssim
+WORKDIR /src
+
+# Default: keep container alive for debugging
+CMD ["tail", "-f", "/dev/null"]
