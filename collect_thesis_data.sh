@@ -30,13 +30,13 @@ run_attack_test() {
     sleep 10
     
     # Baseline - collect normal traffic stats
-    echo "📊 Collecting baseline (30s)..."
+    echo "Collecting baseline (30s)..."
     sleep 30
     BASELINE_ANOMALIES=$(docker logs ics-detection-api 2>&1 | grep "ANOMALY DETECTED" | wc -l)
     echo "   Baseline anomalies: $BASELINE_ANOMALIES"
     
     # Launch attack
-    echo "🚀 Launching $ATTACK_NAME attack..."
+    echo "Launching $ATTACK_NAME attack..."
     ATTACK_RESPONSE=$(curl -s -X POST http://localhost:8002/attacks/execute \
       -H "Content-Type: application/json" \
       -d "{\"attack_type\": \"$ATTACK_TYPE\", \"target\": \"$TARGET\", \"duration\": $DURATION}")
@@ -46,7 +46,7 @@ run_attack_test() {
     echo "$ATTACK_RESPONSE" > "$RESULTS_DIR/${ATTACK_NAME}_launch.json"
     
     # Monitor attack progress
-    echo "⏳ Monitoring attack ($DURATION seconds + analysis time)..."
+    echo "Monitoring attack ($DURATION seconds + analysis time)..."
     for i in {1..18}; do  # 18 * 20s = 6 minutes
         sleep 20
         CURRENT=$(docker logs ics-detection-api 2>&1 | grep "ANOMALY DETECTED" | wc -l)
@@ -55,7 +55,7 @@ run_attack_test() {
     done
     
     # Collect results
-    echo "📥 Collecting detection results..."
+    echo "Collecting detection results..."
     
     # Get all anomalies detected during attack
     docker logs ics-detection-api 2>&1 | grep "ANOMALY DETECTED" > "$RESULTS_DIR/${ATTACK_NAME}_detections.log"
@@ -73,7 +73,7 @@ run_attack_test() {
     TOTAL_DETECTED=$(($(docker logs ics-detection-api 2>&1 | grep "ANOMALY DETECTED" | wc -l) - BASELINE_ANOMALIES))
     
     echo ""
-    echo "✅ Results for $ATTACK_NAME:"
+    echo "   Results for $ATTACK_NAME:"
     echo "   Total anomalies detected: $TOTAL_DETECTED"
     echo "   Detection rate: $([ $TOTAL_DETECTED -gt 0 ] && echo 'DETECTED ✓' || echo 'NOT DETECTED ✗')"
     echo ""
@@ -90,11 +90,11 @@ Detection: $([ $TOTAL_DETECTED -gt 0 ] && echo 'SUCCESS' || echo 'FAILED')
 Timestamp: $(date)
 EOF
     
-    echo "💾 Results saved to $RESULTS_DIR/"
+    echo "Results saved to $RESULTS_DIR/"
     echo ""
     
     # Wait for system to stabilize before next test
-    echo "⏸️  Cooling down (60s)..."
+    echo "Cooling down (60s)..."
     sleep 60
 }
 
@@ -147,11 +147,11 @@ for attack in DoS_Flood Response_Injection Reconnaissance; do
 done
 
 # Copy latest detection files
-echo "📦 Copying detection data files..."
+echo "Copying detection data files..."
 docker cp ics-detection-api:/data/detections/. "$RESULTS_DIR/detection_files/" 2>/dev/null || echo "No detection files to copy"
 
 # Export system logs
-echo "📋 Exporting system logs..."
+echo "Exporting system logs..."
 docker logs ics-detection-api > "$RESULTS_DIR/detector_full_log.txt" 2>&1
 docker logs zeek > "$RESULTS_DIR/zeek_log.txt" 2>&1
 
@@ -211,20 +211,8 @@ EOF
 
 echo ""
 echo "=========================================="
-echo "✅ DATA COLLECTION COMPLETE!"
+echo "DATA COLLECTION COMPLETE!"
 echo "=========================================="
 echo ""
 echo "Results directory: $RESULTS_DIR"
-echo ""
-echo "📊 Key Files for Thesis:"
-echo "  - THESIS_SUMMARY.txt: Overall results"
-echo "  - DATA_INVENTORY.txt: Data description"
-echo "  - detection_files/: Parquet data for analysis"
-echo "  - *_detections.log: Per-attack detection logs"
-echo ""
-echo "Next Steps:"
-echo "  1. Review THESIS_SUMMARY.txt for detection rates"
-echo "  2. Analyze Parquet files in Python/Jupyter"
-echo "  3. Generate comparison charts and tables"
-echo "  4. Calculate statistical significance"
 echo ""

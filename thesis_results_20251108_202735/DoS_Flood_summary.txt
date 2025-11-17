@@ -1,8 +1,0 @@
-Attack Type: DoS_Flood
-Attack ID: dos_flood_plc1_1762633696
-Target: plc1
-Duration: 60s
-Baseline Anomalies: 394
-Total Detected: 22
-Detection: SUCCESS
-Timestamp: Sat Nov  8 08:34:21 PM UTC 2025

@@ -1,8 +1,0 @@
-Attack Type: Response_Injection
-Attack ID: null
-Target: plc1
-Duration: 60s
-Baseline Anomalies: 421
-Total Detected: 28
-Detection: SUCCESS
-Timestamp: Sat Nov  8 08:42:09 PM UTC 2025

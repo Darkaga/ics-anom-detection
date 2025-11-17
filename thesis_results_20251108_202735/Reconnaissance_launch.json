@@ -1,1 +1,0 @@
-{"detail":"Unknown attack type: reconnaissance. Available: ['recon_scan', 'unauthorized_write', 'command_injection', 'dos_flood']"}
