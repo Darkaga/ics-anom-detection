@@ -619,7 +619,7 @@ This project is licensed under the MIT License - see [LICENSE](LICENSE) file for
 
 - **Author**: Chris Pridemore
 - **Email**: christopher.pridemore@go.minneapolis.edu
-- **GitHub**: [@yourusername](https://github.com/Darkaga)
+- **GitHub**: [@Darkaga](https://github.com/Darkaga)
 - **Issues**: [GitHub Issues](https://github.com/Darkaga/ics-anom-detection/issues)
 
 ---
